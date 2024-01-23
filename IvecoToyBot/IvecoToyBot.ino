@@ -2,7 +2,6 @@
    IVECO TOY BOT - CONTROLE REMOTO VIA PS4
 
    Autor: Eng. Renato Augusto
-
    OBJETIVO: Este programa transforma um caminhão de brinquedo da Iveco em um veículo de controle remoto. 
 
    Github: https://github.com/renatoaugustii/IvecoToyBot
@@ -14,7 +13,6 @@
 
    Para dúvidas ou sugestões, entre em contato:
    renato.augusto.correa@outlook.com
-
    Para saber mais detalhes do funcionamento, leia o arquivo README.md nesse mesmo repositório.
 
 */
@@ -35,6 +33,7 @@ const int ReverseLight = 21; // Porta utilizada para Luz de Ré. [PS4.L2()]
 const int ReverseMove = 34; // Porta utilizada para ligar ré. [PS4.L2()]
 const int ForwardMove = 35; // Porta utilizada para acelerar. [PS4.R2()]
 
+
 /*******  VARIÁVEIS AUXILIARES   **********/
 //CONTROLADORES DE STATUS
 bool Truck_ON= false; // Inicializa em falso a variável que diz se o caminhao está ligado
@@ -43,7 +42,7 @@ bool HeadLightState = false; // Variáveis para rastrear o estado dos farois
 bool leftArrowState = false; // Variáveis para rastrear o estado das setas
 bool rightArrowState = false; // Variáveis para rastrear o estado das setas
 bool alertArrowState = false; // Variáveis para rastrear o estado do alerta
-bool MileLightState = false;
+bool mileLightState = false; // Variáveis para rastrear o estado do Farold e Milha
 
 //FLAG DE CONTROLE
 bool OptionsFlag = false; // inicializa a variável que indica se o botao OPTIONS foi pressionado
@@ -53,6 +52,7 @@ bool CrossFlag = false; // Variável para controle do botao pressionado
 bool CircleFlag = false; // Variável para controle do botao pressionado
 bool AlertFlag = false; // Variável para controle do botao pressionado
 bool TriangleFlag = false; // Variável para controle do botao pressionado
+bool ReverseFlag = false;
 
 // Variáveis para controlar o intervalo de piscagem das setas
 unsigned long lastBlinkTimeLeft = 0; // Guarda o tempo do milli() que esta ligada.
@@ -62,7 +62,8 @@ const unsigned long blinkInterval = 350; // Intervalo para o pisca da seta
 
 // Variáveis de controle de movimento
 int ReverseAcc = 0; // Valor para aceleracao do reverso
-
+// Variavel de controle para ruido sonoro da ré
+unsigned long lastNoiseTimeReverse = 0; // Guarda o tempo do milli() que esta ligada.
 
 //CONFIGURAÇÕES 
 void setup() {
@@ -90,13 +91,13 @@ void setup() {
   }
 
   // Emite um bip ao ligar o receptor -  Usado para saber que esta tudo certo entre o controle e o ESP-32
-  tone(Buzzer, 700, 100);
+  tone(Buzzer, 1000, 100);
   delay(100);
-  tone(Buzzer, 1300, 100);
-  delay(500);
-  tone(Buzzer, 700, 100);
+  tone(Buzzer, 1500, 100);
   delay(100);
-  tone(Buzzer, 1300, 100);
+  tone(Buzzer, 2000, 100);
+  delay(100);
+  tone(Buzzer, 2500, 100);
   delay(100);
   noTone(Buzzer);
 }
@@ -104,7 +105,8 @@ void setup() {
 void loop() {
 
 /**************************************************************************************************
-    LÓGICA PARA PARTIDA E DESLIGAMENTO DO MOTOR - MOTOR DESLIGADO DESABILITA ALGUMAS FUNÇÕES
+          LÓGICA PARA PARTIDA E DESLIGAMENTO DO MOTOR 
+- Algumas funções só funcionam após o botão de partida ser acionado. 
 ***************************************************************************************************/
  // Partida (Options) - Tudo no código fica OFF se TRUCK_ON = False
     if (PS4.Options()) {
@@ -118,28 +120,37 @@ void loop() {
     } else {OptionsFlag = false;}
 
 /**************************************************************************************************
-    LÓGICA PARA ACIONAMENTO ACIONAR A RÉ
+          LÓGICA PARA ACIONAMENTO ACIONAR A RÉ
+- Luz de ré acionada diretamente quando o botão L2 é acionado.
 ***************************************************************************************************/
-  if (PS4.L2()) {
-    ReverseAcc = PS4.L2Value();
-    digitalWrite(ReverseLight,HIGH);
-  }else{ReverseAcc=0;digitalWrite(ReverseLight,LOW);}//Quando o botao nao estiver pressionado ele deve se manter em 0
-  
-    Serial.println(ReverseAcc);
+  if (PS4.L2() && Truck_ON) {
+      ReverseAcc = PS4.L2Value();
+      digitalWrite(ReverseLight,HIGH);
+      if(!ReverseFlag){
+        lastNoiseTimeReverse = millis();
+        tone(Buzzer,1200,500); // Ja inicia o som assim que o led da ré é ligado
+        ReverseFlag = true;
+      }
+  }else{ReverseAcc=0;digitalWrite(ReverseLight,LOW);ReverseFlag = false; }//Quando o botao nao estiver pressionado ele deve se manter em 0
+
+  if(ReverseFlag){
+      ReverseBuzzer();
+    }
 
 /**************************************************************************************************
-    LÓGICA PARA ACIONAMENTO DA BUZINA
+          LÓGICA PARA ACIONAMENTO DA BUZINA
+- Buzina não funciona se a Ré estiver ligada para evitar interferencia no Buzzer          
 ***************************************************************************************************/
 
       // Tratativa para Buzina
-      if (PS4.R3()){
+      if (PS4.R3() && ReverseFlag){ // Buzina não irá funcionar quando a ré estiver ligada
           tone(Buzzer, 200, 50); // Frequencia de 200Hz e tempo de 50ms 
       }
 
 /**************************************************************************************************
     LÓGICA PARA ACIONAMENTO DO FREIO
+- Freio acionado diretamente, luz responde de imediato ao comando do botao.    
 ***************************************************************************************************/
-
       // Tratativa para Freio
       if (PS4.Square()){
           digitalWrite(BreakLight, HIGH);
@@ -149,6 +160,7 @@ void loop() {
 
 /**************************************************************************************************
     LÓGICA PARA ACIONAMENTO DO FAROLETE
+- O mesmo botão liga e desliga o farolete
 ***************************************************************************************************/
       if (PS4.Cross()){
         if(!CrossFlag){
@@ -161,7 +173,10 @@ void loop() {
 
 
 /**************************************************************************************************
-    LÓGICA PARA ACIONAMENTO DO FAROL - FAROL LIGA SOMENTE SE O FAROLETE E O CAMINHAO ESTIVER LIGADO
+    LÓGICA PARA ACIONAMENTO DO FAROL 
+- Farol liga somente se o caminhao estiver ligado   
+- Farol liga somente se o farolete estiver ligado
+
 ***************************************************************************************************/
       if (PS4.Circle() && PositionLightState && Truck_ON){
         if(!CircleFlag){
@@ -175,26 +190,27 @@ void loop() {
         if(PositionLightState==false || Truck_ON == false) {digitalWrite(HeadLight, LOW);HeadLightState=false;} //Desliga o farol se o farolete ou o caminhao estiver desligado
         }
 
-
 /**************************************************************************************************
-    LÓGICA PARA ACIONAMENTO DO FAROL DE MILHA - FAROL MILHA LIGA SOMENTE SE O FAROLETE E O CAMINHAO ESTIVER LIGADO
+    LÓGICA PARA ACIONAMENTO DO FAROL DE MILHA 
+- Farol de milha liga somente se o caminhao estiver ligado   
+- Farol de milha  liga somente se o farolete estiver ligado
 ***************************************************************************************************/
       if (PS4.Triangle() && PositionLightState && Truck_ON){
         if(!TriangleFlag){
-          MileLightState = !MileLightState ;
-          digitalWrite(MileLight, MileLightState ? HIGH : LOW); // Define a saída física conforme o estado atual de PositionLightState
+          mileLightState = !mileLightState ;
+          digitalWrite(MileLight, mileLightState ? HIGH : LOW); // Define a saída física conforme o estado atual de PositionLightState
           TriangleFlag = true;
           Serial.println("Farol Milha");
         }
       }else{
         TriangleFlag=false;
-        if(PositionLightState==false || Truck_ON == false) {digitalWrite(MileLight, LOW);MileLightState=false;} //Desliga o farol se o farolete ou o caminhao estiver desligado
+        if(PositionLightState==false || Truck_ON == false) {digitalWrite(MileLight, LOW);mileLightState=false;} //Desliga o farol se o farolete ou o caminhao estiver desligado
         }
-
-
 
 /**************************************************************************************************
     LÓGICA DE FUNCIONAMENTO PARA AS LUZES DE DIREÇÃO - SETAS DIREITA, ESQUERDA E ALERTA
+- Seta liga somente se o caminhao estiver ligado  
+- Alerta funciona em qualquer situção
 ***************************************************************************************************/
     // Seta para Direita (Right)
     // Funciona apenas após a partida 
@@ -264,8 +280,6 @@ void loop() {
 
 }
 
-
-
 /**************************************************************************************************************
                       ESCOPO DE FUNÇÕES - LUZES DE DIREÇÃO - SETAS
 **************************************************************************************************************/
@@ -276,7 +290,8 @@ void blinkAlert() {
     // Inverte o estado das saídas das setas
     digitalWrite(RightArrow, !digitalRead(RightArrow));
     digitalWrite(LeftArrow, !digitalRead(LeftArrow));
-
+    // Emite sinal sonoro da seta
+    tone(Buzzer,50,30);
     // Atualiza o tempo da última piscada para o tempo atual
     lastBlinkTimeAlert = millis();
   }
@@ -293,10 +308,10 @@ void rightArrowBlinkFunction() {
   if ((millis() - lastBlinkTimeRight) >= blinkInterval) {
     // Lê o estado atual do pino de saída da seta para garantir que o estado será trocado
     statePin = digitalRead(RightArrow);
-
     // Inverte o valor da saída; se o LED estiver ligado, ele vai para desligado e vice-versa
     digitalWrite(RightArrow, !statePin);
-
+    // Emite sinal sonoro da seta
+    tone(Buzzer,50,30);
     // Atualiza o tempo da última piscada para o tempo atual
     lastBlinkTimeRight = millis();
   }
@@ -313,8 +328,20 @@ void leftArrowBlinkFunction(){
     // Lê o pino de saída da seta para garantir que o estado será trocado.
     statePin = digitalRead(LeftArrow);
     digitalWrite(LeftArrow, !statePin); // Aqui ele inverte o valor da saída, se o LED estiver ON ele vai para OFF e vice versa.
+    // Emite sinal sonoro da seta
+    tone(Buzzer,50,30);
     // Atualiza o tempo da última piscada para o tempo atual
     lastBlinkTimeLeft = millis();
   }
 }
 
+/**************************************************************************************************************
+                      ESCOPO DE FUNÇÕES - SIRENE DE RÉ 
+**************************************************************************************************************/
+void ReverseBuzzer(){
+  if(millis()-lastNoiseTimeReverse>= 1000)
+  {
+        tone(Buzzer,1200,500);
+        lastNoiseTimeReverse = millis();
+  }
+}
